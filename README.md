@@ -8,7 +8,7 @@ Tools and notebooks to help migrate away from Spotify onto a local-library playe
 	- Dated shopping lists of missing tracks
 	- An orphaned-tracks list (tracks not in any playlist)
 	- Playlist coverage stats and unique-missing counts
-	- (Later) device-ready playlists for the Y1
+	- Device-ready `.m3u8` playlists for the Innioasis Y1
 
 The core logic lives in a Jupyter notebook you can run inside this repo.
 
@@ -184,17 +184,18 @@ Cell 8 in the notebook summarizes overall progress so you can prioritize work wi
 
 Re-run the earlier cells to refresh `matched_df`, then execute Cell 8 whenever you want an updated dashboard view.
 
-### 3.8 Later: device-ready playlists (Innioasis Y1)
+### 3.8 Exporting Innioasis Y1 playlists
 
-The notebook design also supports a longer-term step: generating playlist files that the Innioasis Y1 can read (typically `.m3u` or `.m3u8`):
+Cell 9 now writes device-ready `.m3u8` playlists under `generated_playlists/` so you can copy them straight to the Innioasis SD card:
 
-- For each Spotify playlist CSV:
-	- Walk its rows, using the same match results to get `file_path` for tracks that exist locally.
-	- Compute a relative path suitable for the Y1 (e.g. relative to a `Music/` directory on your SD card).
-	- Skip tracks that are still missing (they will remain only on the shopping list).
-	- Write each playlist as a `.m3u` file with one path per line.
+1. Ensure Cells 1–7 (and the playlist stats if desired) have been re-run so `matched_df` reflects the latest library + Spotify snapshots.
+2. Optionally adjust `PLAYLIST_RELATIVE_ROOT` (default is `Music/`) if your Y1 expects a different on-device base folder.
+3. Run Cell 9. For each playlist Exportify produced:
+	- Tracks with a resolved `file_path` are sorted by their Spotify `Position` (if present) and written as EXTINF entries.
+	- Missing tracks are skipped, but the summary table shows how many were omitted per playlist.
+	- Paths inside each `.m3u8` are relative (e.g. `Music/Artist/Album/Track.mp3`) to simplify copying onto the SD card.
 
-This step can live in later cells of the same notebook, once the shopping list and orphaned list workflow feels solid.
+Check the printed summary for the count of playlists exported and their destination filenames, then copy both the audio folders and matching `.m3u8` files to the Y1.
 
 ## Project roadmap
 
@@ -227,11 +228,11 @@ This section outlines planned phases for Exodusify. It is intentionally high-lev
 ### Phase 4 – Device-ready playlists for Innioasis Y1
 
 - [ ] Decide and document the on-device directory layout (e.g. mirror `Downloaded/` under `Music/`).
-- [ ] Implement notebook cells that:
+- [x] Implement notebook cells that:
 	- For each Spotify playlist, build a list of resolved local `file_path`s.
 	- Compute relative paths appropriate for the Y1.
 	- Write `.m3u` (or `.m3u8`) playlist files, skipping tracks that are still missing.
-- [ ] Add a short "Syncing to Y1" section to the README with copy commands and gotchas.
+- [x] Add a short "Syncing to Y1" section to the README with copy commands and gotchas.
 
 ### Phase 5 – UX and tooling polish
 
