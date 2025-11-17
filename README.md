@@ -17,6 +17,8 @@ The core logic lives in a Jupyter notebook you can run inside this repo.
 - `exportify-master/` – Third-party Exportify tool (JavaScript + HTML) used to export your Spotify playlists and liked songs as CSV.
 - `spotify_playlists/` – Exportify output: one `.csv` per playlist, including `Liked_Songs.csv` and `Your_Top_Songs_YYYY.csv`.
 - `Downloaded/` – Your local audio files, generally organized by artist or artist-combo folders.
+- `Add/` – Staging folder for fresh downloads; the notebook ingests and files these before rescanning the library.
+- `generated_playlists/` – Device-ready `.m3u8` files built by the export cell.
 - `shopping_lists/` – Created by the notebook; contains dated shopping-list CSVs.
 - `README.md` – This file.
 - `exodusify_workflow.ipynb` – The primary notebook described below.
@@ -48,11 +50,13 @@ You only need to do this once on your way out of Spotify. Export your playlists 
 
 ## 3. Running the Exodusify notebook
 
-The Jupyter notebook in the repo root (for example, `exodusify_workflow.ipynb`) will orchestrate three main tasks:
+The Jupyter notebook in the repo root (for example, `exodusify_workflow.ipynb`) orchestrates the full pipeline:
 
-1. Index and canonicalize your downloaded library.
-2. Build dated shopping lists of tracks present in Spotify playlists but missing from your downloads.
-3. Build an orphaned-tracks list of local tracks that are not referenced by any playlist.
+1. Pull any fresh MP3s from `Add/`, infer tags, and place them into the canonical library tree while guarding against duplicates.
+2. Index and canonicalize everything under `Downloaded/`.
+3. Build dated shopping lists of tracks present in Spotify playlists but missing from your downloads.
+4. Build an orphaned-tracks list of local tracks that are not referenced by any playlist.
+5. Generate device-ready playlists for the Innioasis Y1.
 
 ### 3.1 Configuration & helpers
 
@@ -70,7 +74,21 @@ In the first notebook cells, you define paths and helper functions, e.g.:
 
 These helpers are used consistently for both Spotify CSV data and local audio files so that slightly different spellings still match.
 
-### 3.2 Indexing `Downloaded/` (local library index)
+### 3.2 Processing new additions in `Add/`
+
+Before rescanning the library, drop any freshly downloaded MP3s into the `Add/` folder. Cell 3 in the notebook:
+
+- Recursively finds `.mp3` files under `Add/` (future-friendly constant `SUPPORTED_IMPORT_SUFFIXES` gates supported formats).
+- Reads tags with `mutagen` to derive artist/album/title; filename fallbacks keep the flow moving when tags are sparse.
+- Normalizes those fields with `safe_path_component`/`canonicalize_string` and constructs the destination `Downloaded/Artist/Album/Title.mp3` path.
+- Checks for two collision cases before moving the file:
+	- **Same canonical title already in the destination album folder.** This catches situations where old rips had prefixes like track numbers. The notebook logs `skipped_duplicate_title`, prints the existing file path, and leaves the staged file untouched so you can delete or retag it manually before trying again.
+	- **Same filename already present.** Logged as `skipped_exists`.
+- Moves non-conflicting files into `Downloaded/` and prunes any now-empty directories left in `Add/`.
+
+Re-run this cell whenever you place new downloads into `Add/`. If it reports duplicates, clean up the offending files in `Downloaded/` (or rename the staged file) before rerunning.
+
+### 3.3 Indexing `Downloaded/` (local library index)
 
 The notebook walks the `Downloaded/` directory and builds an in-memory index of all audio files:
 
@@ -88,7 +106,7 @@ You can optionally persist this index to disk (e.g. `library_index.csv`) so you 
 
 Rekordbox fits naturally *before* this step if you want to use it as a tag editor: you can point Rekordbox at `Downloaded/`, fix metadata there, then let the notebook read the cleaned tags via `mutagen`.
 
-### 3.3 Loading Spotify playlists
+### 3.4 Loading Spotify playlists
 
 The notebook then loads all CSV files from `spotify_playlists/`:
 
@@ -106,7 +124,7 @@ The notebook then loads all CSV files from `spotify_playlists/`:
 
 The notebook then builds `artist_canonical` and `title_canonical` columns for Spotify tracks using the same normalization helpers as for the local library index. Typically you use the first artist listed in `Artist Name(s)` as the primary artist for matching, while keeping the full string for display.
 
-### 3.4 Matching Spotify tracks to local files
+### 3.5 Matching Spotify tracks to local files
 
 Once both datasets are canonicalized, the notebook matches Spotify tracks against the local index:
 
@@ -120,7 +138,7 @@ After this step each Spotify row will either:
 - Have a `file_path` (meaning the track already exists in `Downloaded/`), or
 - Have `NaN` for `file_path` (meaning it is missing locally).
 
-### 3.5 Generating dated shopping lists
+### 3.6 Generating dated shopping lists
 
 To build a shopping list of tracks that you still need to acquire:
 
@@ -155,7 +173,7 @@ To build a shopping list of tracks that you still need to acquire:
 
 Because the filenames are timestamped in `YYYY-MM-DD-HH-MM-SS` format, they are naturally sortable; the lexicographically last file is your most recent shopping list.
 
-### 3.6 Generating an orphaned-tracks list
+### 3.7 Generating an orphaned-tracks list
 
 The notebook can also compute an **orphaned list**: tracks that exist in `Downloaded/` but are not referenced by any Spotify playlist in `spotify_playlists/`.
 
@@ -174,7 +192,7 @@ This file represents tracks you own that don’t belong to any current playlist 
 - Discover music you may want to add to playlists.
 - Decide whether to keep or archive rarely used tracks.
 
-### 3.7 Reviewing playlist coverage
+### 3.8 Reviewing playlist coverage
 
 Cell 8 in the notebook summarizes overall progress so you can prioritize work without digging into raw DataFrames:
 
@@ -184,7 +202,7 @@ Cell 8 in the notebook summarizes overall progress so you can prioritize work wi
 
 Re-run the earlier cells to refresh `matched_df`, then execute Cell 8 whenever you want an updated dashboard view.
 
-### 3.8 Exporting Innioasis Y1 playlists
+### 3.9 Exporting Innioasis Y1 playlists
 
 Cell 9 now writes device-ready `.m3u8` playlists under `generated_playlists/` so you can copy them straight to the Innioasis SD card:
 
