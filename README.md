@@ -3,7 +3,7 @@
 Tools and notebooks to help migrate away from Spotify onto a local-library player (like the Innioasis Y1) using:
 
 - Spotify playlist exports (via Exportify)
-- A tagged local library under `Downloaded/`
+- A tagged local library under `Music/`
 - A Jupyter notebook that builds:
 	- Dated shopping lists of missing tracks
 	- An orphaned-tracks list (tracks not in any playlist)
@@ -16,9 +16,9 @@ The core logic lives in a Jupyter notebook you can run inside this repo.
 
 - `exportify-master/` – Third-party Exportify tool (JavaScript + HTML) used to export your Spotify playlists and liked songs as CSV.
 - `spotify_playlists/` – Exportify output: one `.csv` per playlist, including `Liked_Songs.csv` and `Your_Top_Songs_YYYY.csv`.
-- `Downloaded/` – Your local audio files, generally organized by artist or artist-combo folders.
-- `Add/` – Staging folder for fresh downloads; the notebook ingests and files these before rescanning the library.
-- `generated_playlists/` – Device-ready `.m3u8` files built by the export cell.
+- `Music/` – Your local audio files, generally organized by artist or artist-combo folders.
+- `Add/` – Staging folder for fresh downloads. Playlist-specific dropboxes now live under `Add/To Playlist/<Playlist Name>`.
+- `Playlists/` – Device-ready `.m3u8` files built by the export cell.
 - `shopping_lists/` – Created by the notebook; contains dated shopping-list CSVs.
 - `README.md` – This file.
 - `exodusify_workflow.ipynb` – The primary notebook described below.
@@ -33,7 +33,7 @@ Recommended Python libraries:
 
 - `pandas` – CSV handling and data manipulation (already required by Exportify’s `requirements.txt`).
 - `numpy` – Used by `pandas` and for numeric operations.
-- `mutagen` – Reads audio metadata (ID3, FLAC, etc.) and duration from files in `Downloaded/`.
+- `mutagen` – Reads audio metadata (ID3, FLAC, etc.) and duration from files in `Music/`.
 - `unidecode` – Normalizes text by removing accents (e.g. `Beyoncé` → `Beyonce`).
 
 From the repo root, create/activate a virtual environment, then install dependencies:
@@ -52,9 +52,9 @@ You only need to do this once on your way out of Spotify. Export your playlists 
 
 The Jupyter notebook in the repo root (for example, `exodusify_workflow.ipynb`) orchestrates the full pipeline:
 
-1. Pull any fresh MP3s from `Add/`, infer tags, and place them into the canonical library tree while guarding against duplicates.
-2. Index and canonicalize everything under `Downloaded/`.
-3. Build dated shopping lists of tracks present in Spotify playlists but missing from your downloads.
+1. Pull any fresh MP3s from `Add/`, infer tags, and place them into the canonical `Music/Artist/Album/Title` tree while guarding against duplicates.
+2. Index and canonicalize everything under `Music/`.
+3. Build dated shopping lists of tracks present in Spotify playlists but missing from your `Music/` library.
 4. Build an orphaned-tracks list of local tracks that are not referenced by any playlist.
 5. Generate device-ready playlists for the Innioasis Y1.
 
@@ -63,9 +63,10 @@ The Jupyter notebook in the repo root (for example, `exodusify_workflow.ipynb`) 
 In the first notebook cells, you define paths and helper functions, e.g.:
 
 - Paths:
-	- `DOWNLOAD_ROOT = "Downloaded"`
+	- `MUSIC_ROOT = "Music"`
 	- `SPOTIFY_PLAYLISTS = "spotify_playlists"`
 	- `SHOPPING_LIST_DIR = "shopping_lists"`
+	- `ADD_ROOT = "Add"`
 - Import core libraries (`os`, `pathlib`, `datetime`, `pandas`, `mutagen`, `unidecode`).
 - Define string-normalization helpers to create **canonical keys** for matching:
 	- Lowercase, strip punctuation and extra spaces.
@@ -76,35 +77,36 @@ These helpers are used consistently for both Spotify CSV data and local audio fi
 
 ### 3.2 Processing new additions in `Add/`
 
-Before rescanning the library, drop any freshly downloaded MP3s into the `Add/` folder. Cell 3 in the notebook:
+Before rescanning the library, drop any freshly downloaded MP3s into the `Add/` folder. Playlist-specific dropboxes live inside `Add/To Playlist/<Playlist Name>` (the notebook auto-creates these to mirror your Exportify CSVs), but you can also drop loose files directly under `Add/`. Cell 3 in the notebook:
 
 - Recursively finds `.mp3` files under `Add/` (future-friendly constant `SUPPORTED_IMPORT_SUFFIXES` gates supported formats).
 - Reads tags with `mutagen` to derive artist/album/title; filename fallbacks keep the flow moving when tags are sparse.
-- Normalizes those fields with `safe_path_component`/`canonicalize_string` and constructs the destination `Downloaded/Artist/Album/Title.mp3` path.
+- Tracks which playlist staging folder a file came from (based on the `Add/To Playlist/<Playlist Name>` prefix) so it can report how many tracks were added for each playlist snapshot.
+- Normalizes those fields with `safe_path_component`/`canonicalize_string` and constructs the destination `Music/Artist/Album/Title.mp3` path.
 - Checks for two collision cases before moving the file:
 	- **Same canonical title already in the destination album folder.** This catches situations where old rips had prefixes like track numbers. The notebook logs `skipped_duplicate_title`, prints the existing file path, and leaves the staged file untouched so you can delete or retag it manually before trying again.
 	- **Same filename already present.** Logged as `skipped_exists`.
-- Moves non-conflicting files into `Downloaded/` and prunes any now-empty directories left in `Add/`.
+- Moves non-conflicting files into `Music/` and prunes any now-empty directories left in `Add/`.
 
-Re-run this cell whenever you place new downloads into `Add/`. If it reports duplicates, clean up the offending files in `Downloaded/` (or rename the staged file) before rerunning.
+Re-run this cell whenever you place new downloads into `Add/`. If it reports duplicates, clean up the offending files in `Music/` (or rename the staged file) before rerunning.
 
-### 3.3 Indexing `Downloaded/` (local library index)
+### 3.3 Indexing `Music/` (local library index)
 
-The notebook walks the `Downloaded/` directory and builds an in-memory index of all audio files:
+The notebook walks the `Music/` directory and builds an in-memory index of all audio files:
 
 - For each audio file (e.g. `.mp3`, `.flac`, `.m4a`, etc.):
 	- Use `mutagen` to read tags (`artist`, `title`, `album`) and duration.
 	- Fall back to folder/filename heuristics when tags are missing.
 	- Build canonical `artist_canonical` and `title_canonical` using the helpers.
 - Store this in a `pandas.DataFrame` with columns such as:
-	- `file_path` – Relative path from `Downloaded/`.
+	- `file_path` – Relative path from `Music/`.
 	- `artist_raw`, `title_raw`, `album_raw`.
 	- `artist_canonical`, `title_canonical`.
 	- `duration_ms`.
 
 You can optionally persist this index to disk (e.g. `library_index.csv`) so you have an auditable snapshot and avoid rebuilding it from scratch every time, but for initial development the notebook can keep it in memory.
 
-Rekordbox fits naturally *before* this step if you want to use it as a tag editor: you can point Rekordbox at `Downloaded/`, fix metadata there, then let the notebook read the cleaned tags via `mutagen`.
+Rekordbox fits naturally *before* this step if you want to use it as a tag editor: you can point Rekordbox at `Music/`, fix metadata there, then let the notebook read the cleaned tags via `mutagen`.
 
 ### 3.4 Loading Spotify playlists
 
@@ -135,7 +137,7 @@ Once both datasets are canonicalized, the notebook matches Spotify tracks agains
 
 After this step each Spotify row will either:
 
-- Have a `file_path` (meaning the track already exists in `Downloaded/`), or
+- Have a `file_path` (meaning the track already exists in `Music/`), or
 - Have `NaN` for `file_path` (meaning it is missing locally).
 
 ### 3.6 Generating dated shopping lists
@@ -175,7 +177,7 @@ Because the filenames are timestamped in `YYYY-MM-DD-HH-MM-SS` format, they are 
 
 ### 3.7 Generating an orphaned-tracks list
 
-The notebook can also compute an **orphaned list**: tracks that exist in `Downloaded/` but are not referenced by any Spotify playlist in `spotify_playlists/`.
+The notebook can also compute an **orphaned list**: tracks that exist in `Music/` but are not referenced by any Spotify playlist in `spotify_playlists/`.
 
 Steps:
 
@@ -204,10 +206,10 @@ Re-run the earlier cells to refresh `matched_df`, then execute Cell 8 whenever y
 
 ### 3.9 Exporting Innioasis Y1 playlists
 
-Cell 9 now writes device-ready `.m3u8` playlists under `generated_playlists/` so you can copy them straight to the Innioasis SD card:
+Cell 9 now writes device-ready `.m3u8` playlists under `Playlists/` so you can copy them straight to the Innioasis SD card:
 
 1. Ensure Cells 1–7 (and the playlist stats if desired) have been re-run so `matched_df` reflects the latest library + Spotify snapshots.
-2. Optionally adjust `PLAYLIST_RELATIVE_ROOT` (default is `Music/`) if your Y1 expects a different on-device base folder.
+2. Ensure the export cell points at the correct on-device base folder (default `Music/`).
 3. Run Cell 9. For each playlist Exportify produced:
 	- Tracks with a resolved `file_path` are sorted by their Spotify `Position` (if present) and written as EXTINF entries.
 	- Missing tracks are skipped, but the summary table shows how many were omitted per playlist.
@@ -223,7 +225,7 @@ This section outlines planned phases for Exodusify. It is intentionally high-lev
 
 - [x] Document environment setup and required Python libraries.
 - [x] Define a Jupyter notebook workflow that:
-	- Indexes `Downloaded/` with canonical artist/title keys.
+	- Indexes `Music/` with canonical artist/title keys.
 	- Loads and merges `spotify_playlists/` CSVs.
 	- Matches Spotify tracks to local files.
 	- Generates timestamped shopping lists of missing tracks.
@@ -232,8 +234,8 @@ This section outlines planned phases for Exodusify. It is intentionally high-lev
 
 ### Phase 2 – Persistence and performance
 
-- [ ] Persist the local library index to disk as CSV (e.g. `library_index.csv`) so full rescans of `Downloaded/` are optional and auditable.
-- [ ] Add incremental update logic (only rescan new/changed files under `Downloaded/`).
+- [ ] Persist the local library index to disk as CSV (e.g. `library_index.csv`) so full rescans of `Music/` are optional and auditable.
+- [ ] Add incremental update logic (only rescan new/changed files under `Music/`).
 - [x] Add summary metrics cells in the notebook (counts of tracks, playlists, missing tracks, orphans).
 
 ### Phase 3 – Better matching and normalization
@@ -245,7 +247,7 @@ This section outlines planned phases for Exodusify. It is intentionally high-lev
 
 ### Phase 4 – Device-ready playlists for Innioasis Y1
 
-- [ ] Decide and document the on-device directory layout (e.g. mirror `Downloaded/` under `Music/`).
+- [ ] Decide and document the on-device directory layout (e.g. mirror `Music/` under the device's `/Music`).
 - [x] Implement notebook cells that:
 	- For each Spotify playlist, build a list of resolved local `file_path`s.
 	- Compute relative paths appropriate for the Y1.
